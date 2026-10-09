@@ -1,20 +1,28 @@
 name: Testbook API Automation Tests
 
+# ============================================================
+# WORKFLOW TRIGGERS
+# ============================================================
+
 on:
 
-  # Run when automation framework itself changes
+  # Run automation when automation code itself changes
   push:
     branches:
       - main
 
-  # Allow manual execution
+  # Allow manual execution from GitHub Actions
   workflow_dispatch:
 
-  # Allow application repository to trigger this workflow
+  # Run when successfully triggered by the application repo
   repository_dispatch:
     types:
       - book-api-build-success
 
+
+# ============================================================
+# JOB
+# ============================================================
 
 jobs:
 
@@ -31,10 +39,7 @@ jobs:
     steps:
 
       # ======================================================
-      # STEP 1 - GET AUTOMATION CODE
-      # ======================================================
-      #
-      # Download the RestAssured automation framework.
+      # STEP 1 - CHECKOUT AUTOMATION REPOSITORY
       # ======================================================
 
       - name: Checkout Automation Repository
@@ -42,7 +47,7 @@ jobs:
 
 
       # ======================================================
-      # STEP 2 - INSTALL JAVA
+      # STEP 2 - SET UP JAVA
       # ======================================================
 
       - name: Set up Java 17
@@ -54,15 +59,18 @@ jobs:
 
 
       # ======================================================
-      # STEP 3 - GET BOOK API SOURCE CODE
+      # STEP 3 - CHECKOUT APPLICATION REPOSITORY
       # ======================================================
       #
-      # The automation runner is a completely new computer.
+      # The automation workflow runs on its own GitHub runner.
       #
-      # Therefore, it doesn't have the Book API application.
+      # Therefore we also need the application source code
+      # so that we can start the application locally.
       #
-      # We download the application repository into a folder
-      # called "book-api".
+      # The application will be downloaded into:
+      #
+      #     book-api/
+      #
       # ======================================================
 
       - name: Checkout Book API
@@ -74,17 +82,14 @@ jobs:
 
 
       # ======================================================
-      # STEP 4 - BUILD BOOK API DOCKER IMAGE
-      # ======================================================
-      #
-      # Build a Docker image from the Book API Dockerfile.
-      #
-      # GitHub's Ubuntu runner already provides Docker.
+      # STEP 4 - BUILD APPLICATION DOCKER IMAGE
       # ======================================================
 
       - name: Build Book API Docker Image
         run: |
-          echo "Building Testbook API Docker image..."
+          echo "=========================================="
+          echo "Building Book API Docker Image"
+          echo "=========================================="
 
           docker build \
             -t testbook-api:latest \
@@ -92,22 +97,14 @@ jobs:
 
 
       # ======================================================
-      # STEP 5 - START BOOK API
-      # ======================================================
-      #
-      # Start the application in the background.
-      #
-      # Port 8080 inside Docker is connected to port 8080
-      # on the GitHub runner.
-      #
-      # Therefore RestAssured can use:
-      #
-      # http://localhost:8080
+      # STEP 5 - START APPLICATION
       # ======================================================
 
       - name: Start Book API
         run: |
-          echo "Starting Testbook API..."
+          echo "=========================================="
+          echo "Starting Book API"
+          echo "=========================================="
 
           docker run -d \
             --name bookapi \
@@ -116,19 +113,13 @@ jobs:
 
 
       # ======================================================
-      # STEP 6 - WAIT FOR APPLICATION
-      # ======================================================
-      #
-      # Starting Docker does not mean Spring Boot is
-      # immediately ready.
-      #
-      # We repeatedly call /api/books until it responds.
+      # STEP 6 - WAIT UNTIL APPLICATION IS READY
       # ======================================================
 
       - name: Wait for Book API
         run: |
 
-          echo "Waiting for Testbook API..."
+          echo "Waiting for Book API..."
 
           for i in {1..30}
           do
@@ -139,7 +130,7 @@ jobs:
             then
 
               echo ""
-              echo "Testbook API is ready!"
+              echo "Book API is ready."
               exit 0
 
             fi
@@ -151,7 +142,7 @@ jobs:
           done
 
           echo ""
-          echo "ERROR: Testbook API failed to start."
+          echo "ERROR: Book API failed to start."
           echo ""
 
           docker logs bookapi
@@ -160,55 +151,109 @@ jobs:
 
 
       # ======================================================
-      # STEP 7 - RUN AUTOMATION TESTS
+      # STEP 7 - RUN RESTASSURED AUTOMATION TESTS
       # ======================================================
       #
-      # Now we KNOW that the Book API is running.
+      # Maven Surefire runs the tests.
       #
-      # RestAssured tests can safely call localhost:8080.
+      # It automatically creates reports under:
+      #
+      #     target/surefire-reports/
+      #
       # ======================================================
 
       - name: Run RestAssured Automation Tests
         run: |
 
           echo "=========================================="
-          echo "Running API Automation Tests"
+          echo "Running RestAssured Automation Tests"
           echo "=========================================="
 
-          echo "Target application:"
-          echo "${BASE_URL}"
+          echo ""
+          echo "Target API: ${BASE_URL}"
+          echo ""
 
           mvn --batch-mode clean test \
             -Dbase.url="${BASE_URL}"
 
 
       # ======================================================
-      # STEP 8 - SHOW LOGS IF SOMETHING FAILS
+      # STEP 8 - UPLOAD AUTOMATION TEST REPORT
       # ======================================================
       #
-      # If the tests fail, application logs can help us
-      # understand what happened.
+      # This is the REPORT GENERATION/PRESERVATION part.
+      #
+      # Maven Surefire generated the results during:
+      #
+      #     mvn clean test
+      #
+      # We now upload those results to GitHub Actions.
+      #
+      # IMPORTANT:
+      #
+      # if: always()
+      #
+      # means this step runs even if some automation
+      # tests fail.
+      #
+      # That is particularly important because when a test
+      # fails, we want to see its report.
+      #
+      # ======================================================
+
+      - name: Upload Automation Test Reports
+        if: always()
+
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: automation-test-reports
+
+          path: target/surefire-reports/
+
+          if-no-files-found: warn
+
+          retention-days: 30
+
+
+      # ======================================================
+      # STEP 9 - SHOW APPLICATION LOGS ON FAILURE
       # ======================================================
 
       - name: Show Book API Logs on Failure
         if: failure()
+
         run: |
-          echo "Book API logs:"
+
+          echo "=========================================="
+          echo "Book API Logs"
+          echo "=========================================="
+
           docker logs bookapi || true
 
 
       # ======================================================
-      # STEP 9 - CLEAN UP
+      # STEP 10 - CLEAN UP
       # ======================================================
       #
-      # Always remove the application container when finished.
+      # Always stop and remove the Docker container.
       #
-      # "if: always()" means this step runs even when the
-      # automation tests fail.
+      # This runs whether tests pass or fail.
+      #
       # ======================================================
 
-      - name: Stop Book API
+      - name: Clean Up Docker
         if: always()
+
         run: |
+
+          echo "=========================================="
+          echo "Cleaning Up"
+          echo "=========================================="
+
           docker stop bookapi || true
+
           docker rm bookapi || true
+
+          echo "Cleanup complete."
