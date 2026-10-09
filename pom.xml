@@ -37,6 +37,13 @@
             <version>${allure.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- Keep JUnit Platform Launcher compatible with JUnit 5.12.2 -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <version>1.12.2</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
