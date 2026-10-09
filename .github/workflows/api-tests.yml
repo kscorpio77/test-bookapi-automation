@@ -6,23 +6,19 @@ name: Testbook API Automation Tests
 
 on:
 
-  # Run automation when automation code itself changes
+  # Run if automation code itself changes
   push:
     branches:
       - main
 
-  # Allow manual execution from GitHub Actions
+  # Allow manual execution
   workflow_dispatch:
 
-  # Run when successfully triggered by the application repo
+  # Triggered by the Book API application repository
   repository_dispatch:
     types:
       - book-api-build-success
 
-
-# ============================================================
-# JOB
-# ============================================================
 
 jobs:
 
@@ -47,7 +43,7 @@ jobs:
 
 
       # ======================================================
-      # STEP 2 - SET UP JAVA
+      # STEP 2 - INSTALL JAVA
       # ======================================================
 
       - name: Set up Java 17
@@ -59,18 +55,7 @@ jobs:
 
 
       # ======================================================
-      # STEP 3 - CHECKOUT APPLICATION REPOSITORY
-      # ======================================================
-      #
-      # The automation workflow runs on its own GitHub runner.
-      #
-      # Therefore we also need the application source code
-      # so that we can start the application locally.
-      #
-      # The application will be downloaded into:
-      #
-      #     book-api/
-      #
+      # STEP 3 - CHECKOUT BOOK API APPLICATION
       # ======================================================
 
       - name: Checkout Book API
@@ -82,7 +67,7 @@ jobs:
 
 
       # ======================================================
-      # STEP 4 - BUILD APPLICATION DOCKER IMAGE
+      # STEP 4 - BUILD DOCKER IMAGE
       # ======================================================
 
       - name: Build Book API Docker Image
@@ -113,13 +98,13 @@ jobs:
 
 
       # ======================================================
-      # STEP 6 - WAIT UNTIL APPLICATION IS READY
+      # STEP 6 - WAIT FOR APPLICATION
       # ======================================================
 
       - name: Wait for Book API
         run: |
 
-          echo "Waiting for Book API..."
+          echo "Waiting for Book API to become ready..."
 
           for i in {1..30}
           do
@@ -130,7 +115,10 @@ jobs:
             then
 
               echo ""
-              echo "Book API is ready."
+              echo "=========================================="
+              echo "Book API is READY"
+              echo "=========================================="
+
               exit 0
 
             fi
@@ -143,7 +131,6 @@ jobs:
 
           echo ""
           echo "ERROR: Book API failed to start."
-          echo ""
 
           docker logs bookapi
 
@@ -154,11 +141,13 @@ jobs:
       # STEP 7 - RUN RESTASSURED AUTOMATION TESTS
       # ======================================================
       #
-      # Maven Surefire runs the tests.
+      # JUnit + Allure will generate:
       #
-      # It automatically creates reports under:
+      # target/allure-results/
       #
-      #     target/surefire-reports/
+      # Maven Surefire will also continue generating:
+      #
+      # target/surefire-reports/
       #
       # ======================================================
 
@@ -178,47 +167,150 @@ jobs:
 
 
       # ======================================================
-      # STEP 8 - UPLOAD AUTOMATION TEST REPORT
+      # STEP 8 - UPLOAD RAW SUREFIRE REPORTS
       # ======================================================
       #
-      # This is the REPORT GENERATION/PRESERVATION part.
-      #
-      # Maven Surefire generated the results during:
-      #
-      #     mvn clean test
-      #
-      # We now upload those results to GitHub Actions.
-      #
-      # IMPORTANT:
-      #
-      # if: always()
-      #
-      # means this step runs even if some automation
-      # tests fail.
-      #
-      # That is particularly important because when a test
-      # fails, we want to see its report.
+      # Keep the original Maven reports as well.
       #
       # ======================================================
 
-      - name: Upload Automation Test Reports
+      - name: Upload Surefire Test Reports
         if: always()
 
         uses: actions/upload-artifact@v4
 
         with:
-
-          name: automation-test-reports
-
+          name: surefire-test-reports
           path: target/surefire-reports/
-
           if-no-files-found: warn
-
           retention-days: 30
 
 
       # ======================================================
-      # STEP 9 - SHOW APPLICATION LOGS ON FAILURE
+      # STEP 9 - INSTALL ALLURE COMMAND LINE
+      # ======================================================
+      #
+      # Allure results are data files.
+      #
+      # The Allure command-line program converts those
+      # results into a proper HTML website.
+      #
+      # ======================================================
+
+      - name: Install Allure
+        if: always()
+
+        run: |
+
+          echo "Installing Allure..."
+
+          ALLURE_VERSION=2.29.0
+
+          wget -q \
+            "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz"
+
+          sudo tar -zxvf \
+            "allure-${ALLURE_VERSION}.tgz" \
+            -C /opt/
+
+          sudo ln -sf \
+            "/opt/allure-${ALLURE_VERSION}/bin/allure" \
+            /usr/local/bin/allure
+
+          echo ""
+          echo "Installed Allure version:"
+
+          allure --version
+
+
+      # ======================================================
+      # STEP 10 - GENERATE ALLURE HTML REPORT
+      # ======================================================
+      #
+      # Input:
+      #
+      # target/allure-results
+      #
+      # Output:
+      #
+      # target/allure-report
+      #
+      # ======================================================
+
+      - name: Generate Allure HTML Report
+        if: always()
+
+        run: |
+
+          echo "=========================================="
+          echo "Generating Allure HTML Report"
+          echo "=========================================="
+
+          if [ -d "target/allure-results" ] && \
+             [ "$(ls -A target/allure-results 2>/dev/null)" ]
+          then
+
+            allure generate \
+              target/allure-results \
+              --clean \
+              -o target/allure-report
+
+            echo ""
+            echo "Allure HTML report generated successfully."
+
+          else
+
+            echo ""
+            echo "WARNING: No Allure results were generated."
+            echo "Check the Allure configuration in pom.xml."
+
+          fi
+
+
+      # ======================================================
+      # STEP 11 - UPLOAD ALLURE HTML REPORT
+      # ======================================================
+      #
+      # This is the attractive HTML report.
+      #
+      # Download it from GitHub Actions -> Artifacts.
+      #
+      # ======================================================
+
+      - name: Upload Allure HTML Report
+        if: always()
+
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: allure-html-report
+          path: target/allure-report/
+          if-no-files-found: warn
+          retention-days: 30
+
+
+      # ======================================================
+      # STEP 12 - UPLOAD RAW ALLURE RESULTS
+      # ======================================================
+      #
+      # Useful for troubleshooting and future report history.
+      #
+      # ======================================================
+
+      - name: Upload Allure Results
+        if: always()
+
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: allure-results
+          path: target/allure-results/
+          if-no-files-found: warn
+          retention-days: 30
+
+
+      # ======================================================
+      # STEP 13 - APPLICATION LOGS ON FAILURE
       # ======================================================
 
       - name: Show Book API Logs on Failure
@@ -227,20 +319,14 @@ jobs:
         run: |
 
           echo "=========================================="
-          echo "Book API Logs"
+          echo "BOOK API LOGS"
           echo "=========================================="
 
           docker logs bookapi || true
 
 
       # ======================================================
-      # STEP 10 - CLEAN UP
-      # ======================================================
-      #
-      # Always stop and remove the Docker container.
-      #
-      # This runs whether tests pass or fail.
-      #
+      # STEP 14 - CLEAN UP
       # ======================================================
 
       - name: Clean Up Docker
@@ -253,7 +339,7 @@ jobs:
           echo "=========================================="
 
           docker stop bookapi || true
-
           docker rm bookapi || true
 
-          echo "Cleanup complete."
+          echo ""
+          echo "Cleanup completed."
