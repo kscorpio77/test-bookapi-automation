@@ -1,0 +1,189 @@
+
+name: Testbook API - CI Automation Pipeline
+
+# ============================================================
+# PIPELINE TRIGGERS
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+  repository_dispatch:
+    types:
+      - book-api-build-success
+
+# Least-privilege token permissions
+permissions:
+  contents: read
+
+jobs:
+  api-automation:
+
+    name: Build, Deploy Locally, Test and Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      BASE_URL: http://localhost:8080
+      IMAGE_NAME: testbook-api:latest
+      CONTAINER_NAME: bookapi
+      HOST_PORT: "8080"
+      CONTAINER_PORT: "8080"
+      ALLURE_VERSION: "2.29.0"
+      ALLURE_RESULTS_DIR: target/allure-results
+      ALLURE_REPORT_DIR: target/allure-report
+      LOG_DIR: target/docker-logs
+
+    steps:
+
+      # ======================================================
+      # STAGE 1 - SOURCE CODE
+      # ======================================================
+
+      - name: Checkout Automation Repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Book API Application
+        uses: actions/checkout@v4
+        with:
+          repository: kscorpio77/testbookapiworkflowdemo
+          ref: main
+          path: book-api
+
+      # ======================================================
+      # STAGE 2 - BUILD ENVIRONMENT
+      # ======================================================
+
+      - name: Set Up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Verify Build Tools
+        run: |
+          echo "===== Build Environment ====="
+          java -version
+          mvn -version
+          docker --version
+          bash --version
+
+      # ======================================================
+      # STAGE 3 - APPLICATION BUILD AND STARTUP
+      #
+      # Delegated to reusable shell script.
+      # ======================================================
+
+      - name: Build Docker Image and Start Book API
+        run: |
+          bash scripts/start-book-api.sh ./book-api
+
+      # ======================================================
+      # STAGE 4 - API AUTOMATION
+      #
+      # Delegated to reusable shell script.
+      # ======================================================
+
+      - name: Execute RestAssured API Tests
+        run: |
+          bash scripts/run-api-tests.sh
+
+      # ======================================================
+      # STAGE 5 - REPORTING TOOL INSTALLATION
+      #
+      # Run even if Maven tests fail.
+      # ======================================================
+
+      - name: Install Allure Reporting Tool
+        if: always()
+        run: |
+          bash scripts/install-allure.sh
+
+      # ======================================================
+      # STAGE 6 - GENERATE ALLURE HTML REPORT
+      #
+      # Run even when test cases fail.
+      # ======================================================
+
+      - name: Generate Allure HTML Report
+        if: always()
+        run: |
+          bash scripts/generate-allure-report.sh
+
+      # ======================================================
+      # STAGE 7 - DOCKER LOG COLLECTION AND CLEANUP
+      #
+      # Always clean up, including failed test runs.
+      # ======================================================
+
+      - name: Collect Logs and Stop Book API
+        if: always()
+        run: |
+          bash scripts/stop-book-api.sh
+
+      # ======================================================
+      # STAGE 8 - UPLOAD TEST REPORTS
+      # ======================================================
+
+      - name: Upload Maven Surefire Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-test-reports
+          path: target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Allure HTML Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-html-report
+          path: target/allure-report/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Raw Allure Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: target/allure-results/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Docker Application Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-api-docker-logs
+          path: target/docker-logs/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ======================================================
+      # STAGE 9 - JOB SUMMARY
+      # ======================================================
+
+      - name: Publish Pipeline Summary
+        if: always()
+        run: |
+          {
+            echo "## Testbook API CI Pipeline"
+            echo ""
+            echo "| Component | Technology |"
+            echo "|---|---|"
+            echo "| Build | Docker |"
+            echo "| Application | Spring Boot |"
+            echo "| API Tests | RestAssured + JUnit |"
+            echo "| Build Tool | Maven |"
+            echo "| Test Reporting | Allure + Surefire |"
+            echo "| Automation | Bash + GitHub Actions |"
+            echo ""
+            echo "Download reports from the Artifacts section."
+          } >> "$GITHUB_STEP_SUMMARY"
