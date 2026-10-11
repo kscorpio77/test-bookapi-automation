@@ -16,32 +16,41 @@ on:
     types:
       - book-api-build-success
 
-# Least-privilege token permissions
+# GitHub needs permission to request an OIDC token from AWS.
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   api-automation:
 
-    name: Build, Deploy Locally, Test and Report
+    name: Build, Test, Generate Reports and Upload to S3
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     env:
+      # Application configuration
       BASE_URL: http://localhost:8080
       IMAGE_NAME: testbook-api:latest
       CONTAINER_NAME: bookapi
       HOST_PORT: "8080"
       CONTAINER_PORT: "8080"
+
+      # Reporting configuration
       ALLURE_VERSION: "2.29.0"
       ALLURE_RESULTS_DIR: target/allure-results
       ALLURE_REPORT_DIR: target/allure-report
       LOG_DIR: target/docker-logs
 
+      # AWS configuration - GitHub Repository Variables
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      REPORTS_BUCKET: ${{ vars.REPORTS_BUCKET }}
+      REPORT_PREFIX: testbook-api
+
     steps:
 
       # ======================================================
-      # STAGE 1 - SOURCE CODE
+      # STAGE 1 - CHECKOUT SOURCE CODE
       # ======================================================
 
       - name: Checkout Automation Repository
@@ -71,12 +80,11 @@ jobs:
           java -version
           mvn -version
           docker --version
+          aws --version
           bash --version
 
       # ======================================================
-      # STAGE 3 - APPLICATION BUILD AND STARTUP
-      #
-      # Delegated to reusable shell script.
+      # STAGE 3 - BUILD AND START BOOK API
       # ======================================================
 
       - name: Build Docker Image and Start Book API
@@ -84,9 +92,7 @@ jobs:
           bash scripts/start-book-api.sh ./book-api
 
       # ======================================================
-      # STAGE 4 - API AUTOMATION
-      #
-      # Delegated to reusable shell script.
+      # STAGE 4 - EXECUTE API AUTOMATION TESTS
       # ======================================================
 
       - name: Execute RestAssured API Tests
@@ -94,9 +100,7 @@ jobs:
           bash scripts/run-api-tests.sh
 
       # ======================================================
-      # STAGE 5 - REPORTING TOOL INSTALLATION
-      #
-      # Run even if Maven tests fail.
+      # STAGE 5 - INSTALL ALLURE REPORTING TOOL
       # ======================================================
 
       - name: Install Allure Reporting Tool
@@ -106,8 +110,6 @@ jobs:
 
       # ======================================================
       # STAGE 6 - GENERATE ALLURE HTML REPORT
-      #
-      # Run even when test cases fail.
       # ======================================================
 
       - name: Generate Allure HTML Report
@@ -116,9 +118,7 @@ jobs:
           bash scripts/generate-allure-report.sh
 
       # ======================================================
-      # STAGE 7 - DOCKER LOG COLLECTION AND CLEANUP
-      #
-      # Always clean up, including failed test runs.
+      # STAGE 7 - COLLECT LOGS AND CLEAN UP DOCKER
       # ======================================================
 
       - name: Collect Logs and Stop Book API
@@ -127,7 +127,7 @@ jobs:
           bash scripts/stop-book-api.sh
 
       # ======================================================
-      # STAGE 8 - UPLOAD TEST REPORTS
+      # STAGE 8 - UPLOAD REPORTS TO GITHUB ARTIFACTS
       # ======================================================
 
       - name: Upload Maven Surefire Reports
@@ -167,7 +167,30 @@ jobs:
           retention-days: 30
 
       # ======================================================
-      # STAGE 9 - JOB SUMMARY
+      # STAGE 9 - AUTHENTICATE WITH AWS USING OIDC
+      # ======================================================
+
+      - name: Configure AWS Credentials
+        if: always()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: testbook-api-ci
+
+      # ======================================================
+      # STAGE 10 - UPLOAD REPORTS TO AWS S3
+      #
+      # All S3 upload logic is in the shell script.
+      # ======================================================
+
+      - name: Upload Test Reports to AWS S3
+        if: always()
+        run: |
+          bash scripts/upload-reports-s3.sh
+
+      # ======================================================
+      # STAGE 11 - PUBLISH PIPELINE SUMMARY
       # ======================================================
 
       - name: Publish Pipeline Summary
@@ -183,7 +206,10 @@ jobs:
             echo "| API Tests | RestAssured + JUnit |"
             echo "| Build Tool | Maven |"
             echo "| Test Reporting | Allure + Surefire |"
+            echo "| Report Storage | GitHub Artifacts + AWS S3 |"
+            echo "| AWS Authentication | GitHub OIDC |"
             echo "| Automation | Bash + GitHub Actions |"
             echo ""
-            echo "Download reports from the Artifacts section."
+            echo "Reports are uploaded to GitHub Artifacts."
+            echo "S3 publishing is performed by upload-reports-s3.sh."
           } >> "$GITHUB_STEP_SUMMARY"
