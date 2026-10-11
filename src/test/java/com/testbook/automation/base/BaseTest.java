@@ -10,7 +10,7 @@ import io.restassured.specification.RequestSpecification;
 import io.restassured.specification.ResponseSpecification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-
+//Base class
 public abstract class BaseTest {
     protected static RequestSpecification requestSpecification;
     protected static ResponseSpecification jsonResponseSpecification;
