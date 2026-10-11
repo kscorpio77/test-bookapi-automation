@@ -34,14 +34,18 @@ jobs:
 
     steps:
 
-      # ======================================================
-      # STEP 1 - CHECKOUT AUTOMATION REPOSITORY
-      # ======================================================
+      # Step 1: Download the automation project source code onto the GitHub Actions runner.
+      # Automation repository: https://github.com/kscorpio77/test-bookapi-automation
+      #
+      # GitHub's reusable checkout action:
+      # https://github.com/actions/checkout/tree/v4
+      #
+      # This is equivalent to cloning the repository onto a temporary computer.
+      # The downloaded code includes pom.xml, src/, scripts/, etc.
+      # @v4 means version 4 of the checkout action, NOT our project's version.
 
       - name: Checkout Automation Repository
         uses: actions/checkout@v4
-
-
       # ======================================================
       # STEP 2 - INSTALL JAVA
       # ======================================================
